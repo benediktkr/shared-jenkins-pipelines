@@ -22,7 +22,7 @@ def call(Map config) {
 
             stage('build python package') {
                 steps {
-                    sh "docker run --name ${NAME}_jenkins benediktkr/${NAME}:${DOCKER_TAG} build --ansi"
+                    sh "docker run --name ${NAME}_jenkins benediktkr/${NAME}:${DOCKER_TAG} poetry build --ansi"
                     sh "docker cp ${NAME}_jenkins:/sudois/dist ."
                 }
             }
