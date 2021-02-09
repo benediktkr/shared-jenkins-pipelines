@@ -52,5 +52,14 @@ def call(Map config) {
             }
 
         }
+
+        post {
+            cleanup {
+                cleanWs(deleteDirs: true,
+                        disableDeferredWipeout: true,
+                        notFailBuild: true)
+            }
+        }
+
     }
 }
