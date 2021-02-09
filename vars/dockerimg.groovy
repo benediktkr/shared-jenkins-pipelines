@@ -30,6 +30,10 @@ def call(Map config) {
             }
 
             stage('push') {
+                when {
+                    expression { config.docker_push != false }
+
+                }
                 steps {
                     sh "docker push ${DOCKER_NAME}:${DOCKER_TAG}"
                 }
@@ -38,6 +42,8 @@ def call(Map config) {
             stage('push version tag') {
                 when {
                     tag "v*"
+                    expression { config.docker_push != false }
+
                 }
                 steps {
                     sh "docker tag ${DOCKER_NAME}:${DOCKER_TAG} ${DOCKER_NAME}:${TAG_NAME}"
