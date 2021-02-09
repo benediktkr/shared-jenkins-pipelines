@@ -25,11 +25,19 @@ def call(Map config) {
                 }
             }
 
-            stage('build') {
+            stage('build container') {
                 steps {
                     sh "docker build -t ${DOCKER_NAME}:${DOCKER_TAG} ."
-                    sh "docker container create --name ${REPO}_builder ${DOCKER_NAME}:${DOCKER_TAG}"
+                }
+
+            }
+
+            stage('get package') {
+                steps {
+                    sh "docker build --target builder -t ${DOCKER_NAME}:builder ."
+                    sh "docker container create --name ${REPO}_builder ${DOCKER_NAME}:builder"
                     sh "docker container cp ${REPO}_builder:/sudois/dist ."
+
                 }
             }
 
@@ -72,6 +80,7 @@ def call(Map config) {
             }
             cleanup {
                 sh "docker container rm ${REPO}_builder"
+                sh "docker rmi ${DOCKER_NAME}:builder"
                 cleanWs(deleteDirs: true,
                         disableDeferredWipeout: true,
                         notFailBuild: true)
