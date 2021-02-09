@@ -1,4 +1,9 @@
+import is.sudo.jenkins.Utils
+
 def call(Map config) {
+
+    String repo = "${env.JOB_NAME.split('/')[1]}"
+
     pipeline {
         agent any
 
@@ -9,21 +14,22 @@ def call(Map config) {
         }
 
         environment {
-            NAME="${JOB_NAME.split('/')[1]}"
-            DOCKER_TAG="latest"
+            DOCKER_NAME=Utils.docker_image_name(repo)
+            DOCKER_TAG=Utils.default_or_value(config.tag, "latest")
+            REPO="${repo}"
         }
         stages {
-
-            stage('build docker container') {
+            stage('env') {
                 steps {
-                    sh "docker build -t benediktkr/${NAME}:${DOCKER_TAG} ."
+                    sh "env"
                 }
             }
 
-            stage('build python package') {
+            stage('build') {
                 steps {
-                    sh "docker run --name ${NAME}_jenkins benediktkr/${NAME}:${DOCKER_TAG} poetry build --ansi"
-                    sh "docker cp ${NAME}_jenkins:/sudois/dist ."
+                    sh "docker build -t ${DOCKER_NAME}:${DOCKER_TAG} ."
+                    sh "docker container create --name ${REPO}_builder ${DOCKER_NAME}:${DOCKER_TAG}"
+                    sh "docker container cp ${REPO}_builder:/sudois/dist ."
                 }
             }
 
@@ -36,14 +42,14 @@ def call(Map config) {
                 }
             }
 
-            stage('dockerhub latest tag') {
+            stage('dockerhub push latest') {
                 when {
                     not { tag "v*" }
                     branch "master"
                     expression { config.docker == true }
                 }
                 steps {
-                    sh "docker push benediktkr/${NAME}:${DOCKER_TAG}"
+                    sh "docker push ${DOCKER_NAME}:${DOCKER_TAG}"
                 }
             }
 
@@ -53,8 +59,8 @@ def call(Map config) {
                     expression { config.docker == true }
                 }
                 steps {
-                    sh "docker tag benediktkr/${NAME}:${DOCKER_TAG} benediktkr/${NAME}:${TAG_NAME}"
-                    sh "docker push benediktkr/${NAME}:${TAG_NAME}"
+                    sh "docker tag ${DOCKER_NAME}:${DOCKER_TAG} ${DOCKER_NAME}:${TAG_NAME}"
+                    sh "docker push ${DOCKER_NAME}/${NAME}:${TAG_NAME}"
                 }
             }
 
@@ -65,7 +71,7 @@ def call(Map config) {
                 archiveArtifacts artifacts: 'dist/*.tar.gz,dist/*.whl', fingerprint: true
             }
             cleanup {
-                sh "docker rm ${NAME}_jenkins"
+                sh "docker container rm ${REPO}_builder"
                 cleanWs(deleteDirs: true,
                         disableDeferredWipeout: true,
                         notFailBuild: true)
