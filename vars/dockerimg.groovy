@@ -20,12 +20,13 @@ def call(Map config) {
         environment {
             DOCKER_NAME=Utils.docker_image_name(repo)
             DOCKER_TAG=Utils.default_or_value(config.tag, "latest")
+            BUILD_ARGS=Utils.default_or_value(config.build_args, "")
         }
         stages {
 
             stage('build') {
                 steps {
-                    sh "docker build -t ${DOCKER_NAME}:${DOCKER_TAG} ."
+                    sh "docker build ${BUILD_ARGS} -t ${DOCKER_NAME}:${DOCKER_TAG} ."
                 }
             }
 
