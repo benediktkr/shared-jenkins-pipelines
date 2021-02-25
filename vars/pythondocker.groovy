@@ -76,11 +76,18 @@ def call(Map config) {
 
         post {
             success {
-                archiveArtifacts artifacts: 'dist/*.tar.gz,dist/*.whl', fingerprint: true
+                archiveArtifacts(
+                    artifacts: 'dist/*.tar.gz,dist/*.whl',
+                    fingerprint: true
+                )
+                sh "cp dist/*.tar.gz ${env.JENKINS_HOME}/artifacts"
+                sh "cp dist/*.whl ${env.JENKINS_HOME}/artifacts"
+
+
             }
             cleanup {
                 sh "docker container rm ${REPO}_builder"
-                sh "docker rmi ${DOCKER_NAME}:builder"
+                //sh "docker rmi ${DOCKER_NAME}:builder"
                 cleanWs(deleteDirs: true,
                         disableDeferredWipeout: true,
                         notFailBuild: true)
