@@ -25,7 +25,7 @@ def call(Map config) {
 
             stage('build') {
                 steps {
-                    sh "docker build -t ${DOCKER_NAME}:${DOCKER_TAG} ."
+                    sh "docker build --pull -t ${DOCKER_NAME}:${DOCKER_TAG} ."
                 }
             }
 

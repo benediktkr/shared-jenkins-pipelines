@@ -27,14 +27,14 @@ def call(Map config) {
 
             stage('build container') {
                 steps {
-                    sh "docker build -t ${DOCKER_NAME}:${DOCKER_TAG} ."
+                    sh "docker build --pull -t ${DOCKER_NAME}:${DOCKER_TAG} ."
                 }
 
             }
 
             stage('get package') {
                 steps {
-                    sh "docker build --target builder -t ${DOCKER_NAME}:builder ."
+                    sh "docker build --pull --target builder -t ${DOCKER_NAME}:builder ."
                     sh "docker container create --name ${REPO}_builder ${DOCKER_NAME}:builder"
                     sh "docker container cp ${REPO}_builder:/sudois/dist ."
 
