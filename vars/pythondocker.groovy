@@ -1,5 +1,17 @@
 import is.sudo.jenkins.Utils
 
+def version = ""
+String debfiles = null
+
+def get_version_poetry() {
+    return sh(
+        script: "poetry version | cut -d' ' -f2",
+        returnStdout: true
+    ).trim()
+}
+
+
+
 def call(Map config) {
 
     String repo = "${env.JOB_NAME.split('/')[1]}"
@@ -19,9 +31,27 @@ def call(Map config) {
             REPO="${repo}"
         }
         stages {
-            stage('env') {
+            stage('version') {
                 steps {
-                    sh "env"
+                    script {
+                        def poetry_version = get_version_poetry()
+                        echo poetry_version
+                        sh "env"
+                        if (env.TAG_NAME) {
+                            if (env.TAG_NAME[0] != "v") {
+                                error("invalid tag name: ${env.TAG_NAME}")
+                            }
+                            if (poetry_version != env.TAG_NAME.substring(1)) {
+                                error("tag '${env.TAG_NAME}' does not match ${poetry_version}")
+                            }
+                            version = env.TAG_NAME
+                        }
+                        else {
+                            version = "${poetry_version}-${env.BUILD_NUMBER}"
+                        }
+                        currentBuild.displayName += "- ${version}"
+                        echo "version ${version}"
+                    }
                 }
             }
 
@@ -37,9 +67,36 @@ def call(Map config) {
                     sh "docker build --pull --target builder -t ${DOCKER_NAME}:builder ."
                     sh "docker container create --name ${REPO}_builder ${DOCKER_NAME}:builder"
                     sh "docker container cp ${REPO}_builder:/sudois/dist ."
-
+                    script {
+                        sh 'ls -1 dist/'
+                        debfiles = findFiles(glob: 'dist/*.deb')
+                    }
                 }
             }
+
+            stage('deb file') {
+                when {
+                    branch "master"
+                    expression {
+                        debfiles != null && debfiles.size() == 1
+                    }
+                }
+                steps {
+                    // there will only be one file
+                    script {
+                        build(
+                            job: "/utils/apt",
+                            wait: false,
+                            parameters: [[
+                                $class: 'StringParameterValue',
+                                name: 'filename',
+                                value: "${debfiles[0]}"
+                            ]]
+                        )
+                    }
+                }
+            }
+
 
             stage('pypi') {
                 when {
@@ -50,25 +107,15 @@ def call(Map config) {
                 }
             }
 
-            stage('dockerhub push latest') {
+            stage('dockerhub push') {
                 when {
-                    not { tag "v*" }
                     branch "master"
                     expression { config.docker == true }
                 }
                 steps {
                     sh "docker push ${DOCKER_NAME}:${DOCKER_TAG}"
-                }
-            }
-
-            stage('dockerhub version tag') {
-                when {
-                    tag "v*"
-                    expression { config.docker == true }
-                }
-                steps {
-                    sh "docker tag ${DOCKER_NAME}:${DOCKER_TAG} ${DOCKER_NAME}:${TAG_NAME}"
-                    sh "docker push ${DOCKER_NAME}/${NAME}:${TAG_NAME}"
+                    sh "docker tag ${DOCKER_NAME}:${DOCKER_TAG} ${DOCKER_NAME}:v${version}"
+                    sh "docker push ${DOCKER_NAME}:v${version}"
                 }
             }
 
