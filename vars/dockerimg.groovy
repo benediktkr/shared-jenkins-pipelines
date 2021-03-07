@@ -9,7 +9,7 @@ def call(Map config) {
         agent any
 
         parameters {
-            string(name: 'tag', defaultValue: Utils.default_or_value(config.tag, "latest"))
+            string(name: 'tag')
         }
         triggers {
             cron crontab
@@ -22,7 +22,7 @@ def call(Map config) {
 
         environment {
             DOCKER_NAME=Utils.docker_image_name(repo)
-            DOCKER_TAG=params.tag
+            DOCKER_TAG=Utils.default_or_value(params.tag, "latest")
         }
         stages {
 
