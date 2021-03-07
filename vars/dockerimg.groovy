@@ -9,7 +9,7 @@ def call(Map config) {
         agent any
 
         parameters {
-            string(name: 'tag')
+            string(name: 'tag', defaultValue: config.tag)
         }
         triggers {
             cron crontab
