@@ -77,7 +77,7 @@ def call(Map config) {
         post {
             success {
                 archiveArtifacts(
-                    artifacts: 'dist/*.tar.gz,dist/*.whl',
+                    artifacts: 'dist/*.tar.gz,dist/*.whl,*.deb',
                     fingerprint: true
                 )
                 sh "cp dist/*.tar.gz ${env.JENKINS_HOME}/artifacts"
