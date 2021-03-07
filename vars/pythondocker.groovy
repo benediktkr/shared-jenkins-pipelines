@@ -37,18 +37,20 @@ def call(Map config) {
                         def poetry_version = get_version_poetry()
                         echo poetry_version
                         sh "env"
-                        if (env.TAG_NAME) {
-                            if (env.TAG_NAME[0] != "v") {
-                                error("invalid tag name: ${env.TAG_NAME}")
-                            }
-                            if (poetry_version != env.TAG_NAME.substring(1)) {
-                                error("tag '${env.TAG_NAME}' does not match ${poetry_version}")
-                            }
-                            version = env.TAG_NAME
-                        }
-                        else {
-                            version = "${poetry_version}-${env.BUILD_NUMBER}"
-                        }
+                        // if (env.TAG_NAME) {
+                        //     if (env.TAG_NAME[0] != "v") {
+                        //         error("invalid tag name: ${env.TAG_NAME}")
+                        //     }
+                        //     if (poetry_version != env.TAG_NAME.substring(1)) {
+                        //         error("tag '${env.TAG_NAME}' does not match ${poetry_version}")
+                        //     }
+                        //     version = env.TAG_NAME
+                        // }
+                        // else {
+                        //     version = "${poetry_version}-${env.BUILD_NUMBER}"
+                        // }
+
+                        version = poetry_version
                         currentBuild.displayName += "- ${version}"
                         echo "version ${version}"
                     }
@@ -57,14 +59,14 @@ def call(Map config) {
 
             stage('build container') {
                 steps {
-                    sh "docker build --pull -t ${DOCKER_NAME}:${DOCKER_TAG} ."
+                    sh "docker build --pull --build-arg VERSION=${version} -t ${DOCKER_NAME}:${DOCKER_TAG} ."
                 }
 
             }
 
             stage('get package') {
                 steps {
-                    sh "docker build --pull --target builder -t ${DOCKER_NAME}:builder ."
+                    sh "docker build --pull --build-arg VERSION=${version} --target builder -t ${DOCKER_NAME}:builder ."
                     sh "docker container create --name ${REPO}_builder ${DOCKER_NAME}:builder"
                     sh "docker container cp ${REPO}_builder:/sudois/dist ."
                     script {
@@ -74,14 +76,19 @@ def call(Map config) {
                 }
             }
 
-            stage('deb file') {
+            stage('upload deb file') {
                 when {
                     branch "master"
                     expression {
                         debfiles != null && debfiles.size() == 1
                     }
+                    expression {
+                        config.add_to_apt == true
+                    }
                 }
                 steps {
+                    sh "cp dist/*.deb ${env.JENKINS_HOME}/artifacts"
+
                     // there will only be one file
                     script {
                         build(
@@ -124,7 +131,7 @@ def call(Map config) {
         post {
             success {
                 archiveArtifacts(
-                    artifacts: 'dist/*.tar.gz,dist/*.whl,*.deb',
+                    artifacts: 'dist/*.tar.gz,dist/*.whl,dist/*.deb',
                     fingerprint: true
                 )
                 sh "cp dist/*.tar.gz ${env.JENKINS_HOME}/artifacts"
