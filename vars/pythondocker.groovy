@@ -34,24 +34,26 @@ def call(Map config) {
             stage('version') {
                 steps {
                     script {
+                        sh "git fetch --tags"
+
                         def poetry_version = get_version_poetry()
                         echo poetry_version
                         sh "env"
-                        // if (env.TAG_NAME) {
-                        //     if (env.TAG_NAME[0] != "v") {
-                        //         error("invalid tag name: ${env.TAG_NAME}")
-                        //     }
-                        //     if (poetry_version != env.TAG_NAME.substring(1)) {
-                        //         error("tag '${env.TAG_NAME}' does not match ${poetry_version}")
-                        //     }
-                        //     version = env.TAG_NAME
-                        // }
-                        // else {
-                        //     version = "${poetry_version}-${env.BUILD_NUMBER}"
-                        // }
+                        if (env.TAG_NAME) {
+                            if (env.TAG_NAME[0] != "v") {
+                                error("invalid tag name: ${env.TAG_NAME}")
+                            }
+                            if (poetry_version != env.TAG_NAME.substring(1)) {
+                                error("tag '${env.TAG_NAME}' does not match ${poetry_version}")
+                            }
+                            version = poetry_version
+                        }
+                        else {
+                            version = "${poetry_version}-dev"
+                        }
 
-                        version = poetry_version
-                        currentBuild.displayName += "- ${version}"
+                        //version = poetry_version
+                        currentBuild.displayName += " - ${version}"
                         echo "version ${version}"
                     }
                 }
@@ -78,7 +80,9 @@ def call(Map config) {
 
             stage('upload deb file') {
                 when {
-                    branch "master"
+                    expression {
+                        env.BRANCH_NAME == "master" || env.BRANCH_NAME.startsWith("v")
+                    }
                     expression {
                         debfiles != null && debfiles.size() == 1
                     }
