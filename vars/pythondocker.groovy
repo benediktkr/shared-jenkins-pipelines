@@ -34,17 +34,35 @@ def call(Map config) {
             stage('version') {
                 steps {
                     script {
+                        sh "env"
+
                         sh "git fetch --tags"
 
                         def poetry_version = get_version_poetry()
-                        echo poetry_version
-                        sh "env"
-                        if (env.TAG_NAME) {
-                            if (env.TAG_NAME[0] != "v") {
-                                error("invalid tag name: ${env.TAG_NAME}")
-                            }
-                            if (poetry_version != env.TAG_NAME.substring(1)) {
-                                error("tag '${env.TAG_NAME}' does not match ${poetry_version}")
+                        sh "sed -i \"s/__version__.*/__version__ = '${poetry_version}'/g\" ${env.REPO}/__init__.py"
+
+                        def dirty = sh(
+                            script: "git --no-pager diff --stat -- ${env.REPO}/__init__.py",
+                            returnStdout: true
+                        ).trim()
+                        def newversion = sh(
+                            script: 'git show HEAD -- pyproject.toml | grep "+version"',
+                            returnStatus: true
+                        )
+                        def istagged = sh(
+                            script: "git describe --tags --exact-match",
+                            returnStatus: true
+                        )
+                        // if (dirty != "") {
+                        //     sh "git add ${env.REPO}/__init__.py"
+                        //     sh "git commit -m 'bump __init__.py version to ${poetry_version}'"
+                        //     sh "git push origin HEAD:${env.BRANCH_NAME}"
+
+                        // }
+                        if (newversion == 0) {
+                            if (istagged != 0) {
+                                sh "git tag v${poetry_version}"
+                                sh "git push --tags"
                             }
                             version = poetry_version
                         }
@@ -52,8 +70,12 @@ def call(Map config) {
                             version = "${poetry_version}-dev"
                         }
 
-                        //version = poetry_version
-                        currentBuild.displayName += " - ${version}"
+
+                        // else if (poetry_version != git_version.substring(1)) {
+                        //     error("tag '${git_version}' does not match ${poetry_version}")
+                        // }
+
+                        currentBuild.displayName += " - v${version}"
                         echo "version ${version}"
                     }
                 }
@@ -80,9 +102,9 @@ def call(Map config) {
 
             stage('upload deb file') {
                 when {
-                    expression {
-                        env.BRANCH_NAME == "master" || env.BRANCH_NAME.startsWith("v")
-                    }
+                    // expression {
+                    //     env.BRANCH_NAME == "master" || env.BRANCH_NAME.startsWith("v")
+                    // }
                     expression {
                         debfiles != null && debfiles.size() == 1
                     }
@@ -120,7 +142,7 @@ def call(Map config) {
 
             stage('dockerhub push') {
                 when {
-                    branch "master"
+                    // branch "master"
                     expression { config.docker == true }
                 }
                 steps {
