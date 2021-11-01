@@ -4,6 +4,7 @@ def call(Map config) {
 
     String repo = "${env.JOB_NAME.split('/')[1]}"
     String crontab = Utils.default_or_value(config.cron, "")
+    String dockreg = Utils.default_or_value(config.dockreg, Utils.dockerhub_account(null))
 
     pipeline {
         agent any
@@ -18,7 +19,7 @@ def call(Map config) {
         }
 
         environment {
-            DOCKER_NAME=Utils.docker_image_name(repo)
+            DOCKER_NAME=Utils.docker_image_name(repo, dockreg)
             DOCKER_TAG=Utils.default_or_value(config.tag, "latest")
         }
         stages {
