@@ -1,20 +1,15 @@
 import is.sudo.jenkins.Utils
 
-def version = ""
-String debfiles = null
-
-def get_version_poetry() {
-    return sh(
-        script: "poetry version | cut -d' ' -f2",
-        returnStdout: true
-    ).trim()
-}
-
-
-
 def call(Map config) {
 
     String repo = "${env.JOB_NAME.split('/')[1]}"
+    Boolean push_git_tag = Utils.default_or_value(config.push_git_tag, false)
+    String docker_image_name = Utils.docker_image_name(repo, config.dockreg)
+    String docker_tag = Utils.default_or_value(config.tag, "latest")
+
+    def version = ""
+    def debfiles = []
+
 
     pipeline {
         agent any
@@ -26,8 +21,6 @@ def call(Map config) {
         }
 
         environment {
-            DOCKER_NAME=Utils.docker_image_name(repo)
-            DOCKER_TAG=Utils.default_or_value(config.tag, "latest")
             REPO="${repo}"
         }
         stages {
@@ -35,76 +28,85 @@ def call(Map config) {
                 steps {
                     script {
                         sh "env"
-
                         sh "git fetch --tags"
 
-                        def poetry_version = get_version_poetry()
-                        sh "sed -i \"s/__version__.*/__version__ = '${poetry_version}'/g\" ${env.REPO}/__init__.py"
+                        // # check if file is dirty:
+                        // $ git --no-pager diff --stat -- ${repo}/__init__.py"
+                        //
+                        // # check if file has changed since last commit and grep for a change
+                        // $ git show HEAD -- pyproject.toml | grep "+version"
+                        // +version = "0.3.28"
+                        //
+                        // # get latest tag:
+                        // # get tag of current commit (if any)
+                        // $ git describe --tags --exact-match
+                        // v0.3.28
+                        //
+                        // $ git describe --tags --abbrev=0
+                        // v0.3.0
+                        // $ git describe --tags
+                        // v0.3.0-24-g9f525a4
 
-                        def dirty = sh(
-                            script: "git --no-pager diff --stat -- ${env.REPO}/__init__.py",
-                            returnStdout: true
-                        ).trim()
-                        def newversion = sh(
-                            script: 'git show HEAD -- pyproject.toml | grep "+version"',
-                            returnStatus: true
-                        )
-                        def istagged = sh(
-                            script: "git describe --tags --exact-match",
-                            returnStatus: true
-                        )
-                        if (newversion == 0) {
-                            if (istagged != 0) {
-                                sh "git tag v${poetry_version}"
-                                sh "git push --tags"
+                        def pyproject = readProperties file: 'pyproject.toml'
+                        def pyproject_version = pyproject['version'].replaceAll('"', '')
+                        echo "pyproject.toml version: ${pyproject_version}"
+
+                        if (env.TAG_NAME != null) {
+                            if (!env.TAG_NAME.endsWith(pyproject_version)) {
+                                error "mismatch between git tag (${env.TAG_NAME}) and pyproject (${pyproject_version})"
                             }
-                            version = poetry_version
+                            version = pyproject_version
+                            echo "build release version: ${version}"
                         }
                         else {
-                            version = "${poetry_version}.dev"
+                            def tag_for_version_exists = sh(
+                                script: "git rev-parse v${pyproject_version}",
+                                returnStatus: true
+                            )
+                            // if (tag_for_version_exists == 0 ) {
+                            //     error "git tag already exists for ${pyproject_version}, please bump the version number"
+                            // }
+                            version = "${pyproject_version}.dev"
+                            echo "building dev version: ${version}"
                         }
-
-                        currentBuild.displayName += " - v${version}"
-                        echo "version ${version}"
+                        currentBuild.displayName += " - ${repo} v${version}"
                     }
                 }
             }
 
-            stage('build container') {
+            stage('build') {
                 steps {
-                    sh "docker build --pull --build-arg VERSION=${version} -t ${DOCKER_NAME}:${DOCKER_TAG} ."
-                }
-
-            }
-
-            stage('get package') {
-                steps {
-                    sh "docker build --pull --build-arg VERSION=${version} --target builder -t ${DOCKER_NAME}:builder ."
-                    sh "docker container create --name ${REPO}_builder ${DOCKER_NAME}:builder"
-                    sh "docker container cp ${REPO}_builder:/sudois/dist ."
+                    // build the builder image with $docker_tag (usually 'latest')
+                    sh "docker build --pull --target builder -t ${repo}_builder:${docker_tag} ."
+                    // tag the image with the version number so we can delete old versions
+                    sh "docker tag ${repo}_builder:${docker_tag} ${repo}_builder:${version}"
+                    sh "docker container create --name artifacts-${repo}-${env.BUILD_NUMBER} ${repo}_builder:${version}"
+                    sh "docker container cp artifacts-${repo}-${env.BUILD_NUMBER}:/opt/${repo}/dist ."
                     script {
                         sh 'ls -1 dist/'
                         debfiles = findFiles(glob: 'dist/*.deb')
                     }
                 }
+
             }
 
-            stage('upload deb file') {
+            stage('docker image') {
+                steps {
+                    // usually 'docker_tag' is 'latest'.
+                    sh "docker build --pull -t ${docker_image_name}:${docker_tag} ."
+                    sh "docker tag ${docker_image_name}:${docker_tag} ${docker_image_name}:${version}"
+                }
+            }
+
+             stage('upload deb file') {
                 when {
-                    // expression {
-                    //     env.BRANCH_NAME == "master" || env.BRANCH_NAME.startsWith("v")
-                    // }
-                    expression {
-                        debfiles != null && debfiles.size() == 1
-                    }
-                    expression {
-                        config.add_to_apt == true
-                    }
+                    expression { debfiles.size() > 0 }
                 }
                 steps {
+                    echo "deb"
                     sh "cp dist/*.deb ${env.JENKINS_HOME}/artifacts"
 
-                    // there will only be one file
+                    // curently this only expects 1 file.
                     script {
                         build(
                             job: "/utils/apt",
@@ -119,28 +121,26 @@ def call(Map config) {
                 }
             }
 
-
-            stage('pypi') {
+            stage('publish pip package') {
                 when {
                     expression { config.pypi == true }
                 }
                 steps {
-                    sh "echo 'pypi here i come'"
+                    // --skip-existing: Ignore errors from files already existing in the repository.
+                    sh "docker run --rm -e \"POETRY_CONFIG_DIR=/etc/pypoetry\" ${repo}_builder:${docker_tag} publish -r sudois"
                 }
             }
 
-            stage('dockerhub push') {
+            stage('docker push') {
                 when {
-                    // branch "master"
                     expression { config.docker == true }
                 }
                 steps {
-                    sh "docker push ${DOCKER_NAME}:${DOCKER_TAG}"
-                    sh "docker tag ${DOCKER_NAME}:${DOCKER_TAG} ${DOCKER_NAME}:v${version}"
-                    sh "docker push ${DOCKER_NAME}:v${version}"
+                    sh "docker push ${docker_image_name}:${docker_tag}"
+                    sh "docker push ${docker_image_name}:${version}"
+                    echo "docker push"
                 }
             }
-
         }
 
         post {
@@ -149,17 +149,28 @@ def call(Map config) {
                     artifacts: 'dist/*.tar.gz,dist/*.whl,dist/*.deb',
                     fingerprint: true
                 )
-                sh "cp dist/*.tar.gz ${env.JENKINS_HOME}/artifacts"
-                sh "cp dist/*.whl ${env.JENKINS_HOME}/artifacts"
+                sh "cp -v dist/*.tar.gz ${env.JENKINS_HOME}/artifacts"
+                sh "cp -v dist/*.whl ${env.JENKINS_HOME}/artifacts"
 
 
             }
             cleanup {
-                sh "docker container rm ${REPO}_builder"
-                //sh "docker rmi ${DOCKER_NAME}:builder"
+                sh "rm -v dist/*.tar.gz || true"
+                sh "rm -v dist/*.whl || true"
+
+                sh "docker container rm artifacts-${repo}-${env.BUILD_NUMBER} || true"
+                // keep the ${docker_tag} (usually 'latest' tagged image for faster rebuilding
+                // but dont leave the versioned tags hanging around
+                sh "docker rmi ${repo}_builder:${version} || true"
+
                 cleanWs(deleteDirs: true,
                         disableDeferredWipeout: true,
                         notFailBuild: true)
+            }
+            failure {
+                emailext body: "${env.BUILD_URL}",
+                    subject: "failed: '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+                    to: "jenkins@sudo.is"
             }
         }
     }

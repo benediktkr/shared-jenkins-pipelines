@@ -12,16 +12,11 @@ class Utils {
     }
 
     @NonCPS
-    static String dockerhub_account(String account) {
-        if (account == null) {
-            return "benediktkr"
+    static Boolean default_or_value(Boolean value, Boolean defval) {
+        if (value == null) {
+            return defval
         }
-        return account
-    }
-
-    @NonCPS
-    static String docker_image_name(String project) {
-        return Utils.docker_image_name(project, null)
+        return value
     }
 
     @NonCPS
@@ -33,10 +28,13 @@ class Utils {
     }
 
     @NonCPS
-    static String docker_image_name(String repo,  String account) {
-
-        def imgname = Utils.trim_docker_postfix(repo)
-        def acc = Utils.dockerhub_account(account)
-        return "${acc}/${imgname}"
+    static String docker_image_name(String repo) {
+        return Utils.docker_image_name(repo, null)
+    }
+    @NonCPS
+    static String docker_image_name(String repo, String dockreg) {
+        def trimmed_name = Utils.trim_docker_postfix(repo)
+        def dockreg_url  = Utils.default_or_value(dockreg, "git.sudo.is/ops")
+        return "${dockreg_url}/${trimmed_name}"
     }
 }

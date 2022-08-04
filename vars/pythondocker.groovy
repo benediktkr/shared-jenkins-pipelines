@@ -26,7 +26,7 @@ def call(Map config) {
         }
 
         environment {
-            DOCKER_NAME=Utils.docker_image_name(repo)
+            DOCKER_NAME=Utils.docker_image_name(repo, config.dockreg)
             DOCKER_TAG=Utils.default_or_value(config.tag, "latest")
             REPO="${repo}"
         }
@@ -140,7 +140,7 @@ def call(Map config) {
                 }
             }
 
-            stage('dockerhub push') {
+            stage('docker push') {
                 when {
                     // branch "master"
                     expression { config.docker == true }
