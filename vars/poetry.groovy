@@ -8,6 +8,8 @@ def call(Map config) {
     String docker_image_name = Utils.docker_image_name(repo, config.dockreg)
     String docker_tag = Utils.default_or_value(config.tag, "latest")
 
+    Boolean pip_publish_tags_only = Utils.default_or_value(config.pip_publish_tags_only, true)
+
     def new_version_commit = false
     def version = ""
     def artifacts_exist = false
@@ -122,6 +124,39 @@ def call(Map config) {
                 }
             } // 'docker image'
 
+            stage('docker push') {
+                when {
+                    expression { config.docker == true }
+                }
+                steps {
+                    sh "docker push ${docker_image_name}:${docker_tag}"
+                    sh "docker push ${docker_image_name}:${version}"
+                    echo "docker push"
+                }
+            } // 'docker push'
+
+            stage('poetry publish') {
+                when {
+                    expression { config.pip_publish == true }
+                    anyOf {
+                        tag "v*"
+                        allOf {
+                            expression { pip_publish_tags_only == false }
+                            expression { new_version_commit == true }
+                            expression { artifacts_exist == false }
+                        }
+                    }
+                }
+                steps {
+                    // this does not seem to work:
+                    // --skip-existing: Ignore errors from files already existing in the repository.
+                    withCredentials([string(credentialsId: 'gitea-user-token', variable: "POETRY_PYPI_TOKEN_GITEA")]) {
+                        sh "docker run --rm ${repo}_builder:${docker_tag} config repositories"
+                        sh "docker run --rm -e POETRY_PYPI_TOKEN_GITEA ${repo}_builder:${docker_tag} publish -r gitea"
+                    }
+                }
+            } // 'poetry publish'
+
             stage('update apt repo') {
                 when {
                     expression { debfiles.size() > 0 }
@@ -144,39 +179,6 @@ def call(Map config) {
                     }
                 }
             } // 'update apt repo'
-
-            stage('poetry publish') {
-                when {
-                    expression { config.pip_publish == true }
-                    anyOf {
-                        tag "v*"
-                        allOf {
-                            expression { new_version_commit == true }
-                            expression { artifacts_exist == false }
-                        }
-                    }
-                }
-                steps {
-                    // this does not seem to work:
-                    // --skip-existing: Ignore errors from files already existing in the repository.
-                    withCredentials([string(credentialsId: 'gitea-user-token', variable: "POETRY_PYPI_TOKEN_GITEA")]) {
-                        sh "docker run --rm ${repo}_builder:${docker_tag} config repositories"
-                        sh "docker run --rm -e POETRY_PYPI_TOKEN_GITEA ${repo}_builder:${docker_tag} publish -r gitea"
-                    }
-                }
-            } // 'poetry publish'
-
-            stage('docker push') {
-                when {
-                    expression { config.docker == true }
-                }
-                steps {
-                    sh "docker push ${docker_image_name}:${docker_tag}"
-                    sh "docker push ${docker_image_name}:${version}"
-                    echo "docker push"
-                }
-            } // 'docker push'
-
         }
 
         post {
