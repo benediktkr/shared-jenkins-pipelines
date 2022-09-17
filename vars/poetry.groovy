@@ -127,7 +127,7 @@ def call(Map config) {
                 }
                 steps {
                     // --skip-existing: Ignore errors from files already existing in the repository.
-                    sh "docker run --rm -e \"POETRY_CONFIG_DIR=/etc/pypoetry\" ${repo}_builder:${docker_tag} publish -r sudois"
+                    sh "docker run --rm -v /etc/pypoetry:/etc/pypoetry -e \"POETRY_CONFIG_DIR=/etc/pypoetry\" ${repo}_builder:${docker_tag} publish -r sudois"
                 }
             }
 
