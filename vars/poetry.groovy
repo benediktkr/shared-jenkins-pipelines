@@ -76,13 +76,12 @@ def call(Map config) {
                             returnStatus: true) == 0
                         echo "version tag exists: ${tag_for_version_exists}"
 
-                        def desc_text = [
+                        currentBuild.displayName += " - ${repo} v${version}"
+                        currentBuild.description = [
                             "commit has new version: ${new_version_commit}",
                             "artifacts exist: ${artifacts_exist}",
                             "version tag exists: ${tag_for_version_exists}"
-                        ]
-                        currentBuild.displayName += " - ${repo} v${version}"
-                        currentBuild.description = desc_text.join("\n")
+                        ].join("\n")
 
                         if (env.TAG_NAME != null) {
                             if (!env.TAG_NAME.endsWith(pyproject_version)) {
