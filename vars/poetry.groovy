@@ -3,11 +3,7 @@ import is.sudo.jenkins.Utils
 def call(Map config) {
 
     String repo = "${env.JOB_NAME.split('/')[1]}"
-
-    Boolean push_git_tag = Utils.default_or_value(config.push_git_tag, false)
     String docker_image_name = Utils.docker_image_name(repo, config.dockreg)
-    String docker_tag = Utils.default_or_value(config.tag, "latest")
-
     Boolean pip_publish_tags_only = Utils.default_or_value(config.pip_publish_tags_only, true)
 
     def new_version_commit = false
@@ -102,10 +98,10 @@ def call(Map config) {
 
             stage('build') {
                 steps {
-                    // build the builder image with $docker_tag (usually 'latest')
-                    sh "docker build --pull --target builder --build-arg PIP_REPO_NAME=gitea --build-arg PIP_REPO_URL=${config.pip_repo_url} -t ${repo}_builder:${docker_tag} ."
-                    // tag the image with the version number so we can delete old versions
-                    sh "docker tag ${repo}_builder:${docker_tag} ${repo}_builder:${version}"
+                    // build the builder image with latest
+                    sh "docker build --pull --target builder --build-arg PIP_REPO_NAME=gitea --build-arg PIP_REPO_URL=${config.pip_repo_url} -t ${repo}_builder:latest ."
+
+                    sh "docker tag ${repo}_builder:latest ${repo}_builder:${version}"
                     sh "docker container create --name artifacts-${repo}-${env.BUILD_NUMBER} ${repo}_builder:${version}"
                     sh "docker container cp artifacts-${repo}-${env.BUILD_NUMBER}:/opt/${repo}/dist ."
                     script {
@@ -117,9 +113,8 @@ def call(Map config) {
 
             stage('docker image') {
                 steps {
-                    // usually 'docker_tag' is 'latest'.
-                    sh "docker build --pull -t ${docker_image_name}:${docker_tag} ."
-                    sh "docker tag ${docker_image_name}:${docker_tag} ${docker_image_name}:${version}"
+                    sh "docker build --pull -t ${docker_image_name}:latest ."
+                    sh "docker tag ${docker_image_name}:latest ${docker_image_name}:${version}"
                 }
             } // 'docker image'
 
@@ -128,7 +123,7 @@ def call(Map config) {
                     expression { config.docker == true }
                 }
                 steps {
-                    sh "docker push ${docker_image_name}:${docker_tag}"
+                    sh "docker push ${docker_image_name}:latest"
                     sh "docker push ${docker_image_name}:${version}"
                     echo "docker push"
                 }
@@ -150,8 +145,8 @@ def call(Map config) {
                     // this does not seem to work:
                     // --skip-existing: Ignore errors from files already existing in the repository.
                     withCredentials([string(credentialsId: 'gitea-user-token', variable: "POETRY_PYPI_TOKEN_GITEA")]) {
-                        sh "docker run --rm ${repo}_builder:${docker_tag} config repositories"
-                        sh "docker run --rm -e POETRY_PYPI_TOKEN_GITEA ${repo}_builder:${docker_tag} publish -r gitea"
+                        sh "docker run --rm ${repo}_builder:latest config repositories"
+                        sh "docker run --rm -e POETRY_PYPI_TOKEN_GITEA ${repo}_builder:latest publish -r gitea"
                     }
                 }
             } // 'poetry publish'
@@ -196,8 +191,6 @@ def call(Map config) {
                 sh "rm -v dist/*.whl || true"
 
                 sh "docker container rm artifacts-${repo}-${env.BUILD_NUMBER} || true"
-                // keep the ${docker_tag} (usually 'latest' tagged image for faster rebuilding
-                // but dont leave the versioned tags hanging around
                 sh "docker rmi ${repo}_builder:${version} || true"
 
                 cleanWs(deleteDirs: true,
