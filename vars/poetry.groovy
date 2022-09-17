@@ -3,11 +3,14 @@ import is.sudo.jenkins.Utils
 def call(Map config) {
 
     String repo = "${env.JOB_NAME.split('/')[1]}"
+
     Boolean push_git_tag = Utils.default_or_value(config.push_git_tag, false)
     String docker_image_name = Utils.docker_image_name(repo, config.dockreg)
     String docker_tag = Utils.default_or_value(config.tag, "latest")
 
+    def new_version_commit = false
     def version = ""
+    def artifacts_exist = false
     def debfiles = []
 
 
@@ -47,37 +50,59 @@ def call(Map config) {
                         // $ git describe --tags
                         // v0.3.0-24-g9f525a4
 
+                        new_version_commit = sh(
+                            script: "git show HEAD -- pyproject.toml | grep '+version'",
+                            returnStatus: true) == 0
+                        echo "commit has new version: ${new_version_commit}"
+
                         def pyproject = readProperties file: 'pyproject.toml'
                         def pyproject_version = pyproject['version'].replaceAll('"', '')
                         echo "pyproject.toml version: ${pyproject_version}"
+
+                        version = pyproject_version
+
+                        // both findFiles and fileExists are restricted to the workspace,
+                        // but oth this wont work if we have more build agents
+                        // '...${version}.tar.gz' would also work
+                        artifacts_exist = sh(
+                            script: "ls ../../artifacts/${repo}-${version}\\.*",
+                            returnStatus: true) == 0
+                        echo "found existing artifacts for version ${version}: ${artifacts_exist}"
+
+                        def tag_for_version_exists = sh(
+                            script: "git rev-parse v${pyproject_version}",
+                            returnStatus: true) == 0
+                        echo "version tag exists: ${tag_for_version_exists}"
+
+                        def desc_text = [
+                            "commit has new version: ${new_version_commit}",
+                            "artifacts exist: ${artifacts_exist}",
+                            "version tag exists: ${tag_for_version_exists}"
+                        ]
+                        currentBuild.displayName += " - ${repo} v${version}"
+                        currentBuild.description = desc_text.join("\n")
 
                         if (env.TAG_NAME != null) {
                             if (!env.TAG_NAME.endsWith(pyproject_version)) {
                                 error "mismatch between git tag (${env.TAG_NAME}) and pyproject (${pyproject_version})"
                             }
-                            version = pyproject_version
-                            echo "build release version: ${version}"
+                            echo "building version: ${version}"
                         }
-                        else {
-                            def tag_for_version_exists = sh(
-                                script: "git rev-parse v${pyproject_version}",
-                                returnStatus: true
-                            )
-                            // if (tag_for_version_exists == 0 ) {
-                            //     error "git tag already exists for ${pyproject_version}, please bump the version number"
-                            // }
-                            version = "${pyproject_version}.dev"
-                            echo "building dev version: ${version}"
-                        }
-                        currentBuild.displayName += " - ${repo} v${version}"
+                        // else {
+                        //     if (tag_for_version_exists == 0 ) {
+                        //         error "git tag already exists for ${pyproject_version}, please bump the version number"
+                        //     }
+                        //     version = "${pyproject_version}.dev"
+                        //     echo "building dev version: ${version}"
+                        // }
                     }
                 }
-            }
+            } // 'version'
 
             stage('build') {
                 steps {
                     // build the builder image with $docker_tag (usually 'latest')
-                    sh "docker build --pull --target builder -t ${repo}_builder:${docker_tag} ."
+                    sh "docker build --pull --target builder --build-arg PIP_REPO_NAME=gitea --build-arg PIP_REPO_URL=${config.pip_repo_url} -t ${repo}_builder:${docker_tag} ."
                     // tag the image with the version number so we can delete old versions
                     sh "docker tag ${repo}_builder:${docker_tag} ${repo}_builder:${version}"
                     sh "docker container create --name artifacts-${repo}-${env.BUILD_NUMBER} ${repo}_builder:${version}"
@@ -87,8 +112,7 @@ def call(Map config) {
                         debfiles = findFiles(glob: 'dist/*.deb')
                     }
                 }
-
-            }
+            } // 'build'
 
             stage('docker image') {
                 steps {
@@ -96,9 +120,9 @@ def call(Map config) {
                     sh "docker build --pull -t ${docker_image_name}:${docker_tag} ."
                     sh "docker tag ${docker_image_name}:${docker_tag} ${docker_image_name}:${version}"
                 }
-            }
+            } // 'docker image'
 
-             stage('upload deb file') {
+            stage('update apt repo') {
                 when {
                     expression { debfiles.size() > 0 }
                 }
@@ -119,17 +143,28 @@ def call(Map config) {
                         )
                     }
                 }
-            }
+            } // 'update apt repo'
 
-            stage('publish pip package') {
+            stage('poetry publish') {
                 when {
-                    expression { config.pypi == true }
+                    expression { config.pip_publish == true }
+                    anyOf {
+                        tag "v*"
+                        allOf {
+                            expression { new_version_commit == true }
+                            expression { artifacts_exist == false }
+                        }
+                    }
                 }
                 steps {
+                    // this does not seem to work:
                     // --skip-existing: Ignore errors from files already existing in the repository.
-                    sh "docker run --rm -v /etc/pypoetry:/etc/pypoetry -e \"POETRY_CONFIG_DIR=/etc/pypoetry\" ${repo}_builder:${docker_tag} publish -r sudois"
+                    withCredentials([string(credentialsId: 'gitea-user-token', variable: "POETRY_PYPI_TOKEN_GITEA")]) {
+                        sh "docker run --rm ${repo}_builder:${docker_tag} config repositories"
+                        sh "docker run --rm -e POETRY_PYPI_TOKEN_GITEA ${repo}_builder:${docker_tag} publish -r gitea"
+                    }
                 }
-            }
+            } // 'poetry publish'
 
             stage('docker push') {
                 when {
@@ -140,7 +175,8 @@ def call(Map config) {
                     sh "docker push ${docker_image_name}:${version}"
                     echo "docker push"
                 }
-            }
+            } // 'docker push'
+
         }
 
         post {
