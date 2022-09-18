@@ -120,6 +120,7 @@ def call(Map config) {
 
             stage('docker push') {
                 when {
+                    branch "main"
                     expression { config.docker == true }
                 }
                 steps {
@@ -134,6 +135,7 @@ def call(Map config) {
                     expression { config.pip_publish == true }
                     anyOf {
                         tag "v*"
+                        branch "main"
                         allOf {
                             expression { pip_publish_tags_only == false }
                             expression { new_version_commit == true }
