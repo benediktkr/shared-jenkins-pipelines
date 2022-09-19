@@ -135,8 +135,8 @@ def call(Map config) {
                     expression { config.pip_publish == true }
                     anyOf {
                         tag "v*"
-                        branch "main"
                         allOf {
+                            branch "main"
                             expression { pip_publish_tags_only == false }
                             expression { new_version_commit == true }
                             expression { artifacts_exist == false }
